@@ -38,11 +38,70 @@ def compute_julia_set_sequential(xmin, xmax, ymin, ymax, im_width, im_height, c)
 
     return julia
 
-def compute_julia_in_parallel(size, xmin, xmax, ymin, ymax, patch, nprocs, c):
+def compute_patch(task):
+    # x_start, y_start: top-left corner of this patch in the full image
+    # patch: patch size in pixels (width = height)
+    # meta: tuple with shared values like image size and complex plane bounds
+    x_start, y_start, patch, meta = task
+    size, xmin, xmax, ymin, ymax, c = meta
 
-    # replace the following code
-    # with a parallel version
-    julia_img = compute_julia_set_sequential(xmin, xmax, ymin, ymax, size, size, c)
+    # create an empty patch image to store computed values
+    patch_img = np.zeros((patch, patch))
+
+    # calculate pixel-to-complex-plane scaling
+    xwidth = xmax - xmin
+    yheight = ymax - ymin
+
+    zabs_max = 10 # maximum absolute value of z
+    nit_max = 300 # maximum number of iterations
+
+    for ix in range(patch):
+        for iy in range(patch):
+            nit = 0
+            px = x_start + ix
+            py = y_start + iy
+
+            # skip corners if patch extends outside image bounds
+            if px >= size or py >= size:
+                continue
+
+            # map pixel position to complex plane
+            z = complex(px / size * xwidth + xmin,
+                        py / size * yheight + ymin)
+
+            # do the iterations
+            while abs(z) <= zabs_max and nit < nit_max:
+                z = z**2 + c
+                nit += 1
+
+            # compute the ratio of iterations to max iterations
+            # and store it in the patch image (used for colouring)
+            ratio = nit / nit_max
+            patch_img[ix, iy] = ratio
+
+    return (x_start, y_start, patch_img)
+
+def compute_julia_in_parallel(size, xmin, xmax, ymin, ymax, patch, nprocs, c):
+    # prepare metadata that is shared across the patches
+    meta = (size, xmin, xmax, ymin, ymax, c)
+    tasks = []
+
+    # divide the full image into patches
+    # each task is a patch starting at (x, y) and going to (x+patch, y+patch)
+    for x in range(0, size, patch):
+        for y in range(0, size, patch):
+            tasks.append((x, y, patch, meta))
+
+    # compute in parallel
+    with Pool(processes=nprocs) as pool:
+        completed = pool.map(compute_patch, tasks, chunksize=1)
+
+    # assemble the final image
+    julia_img = np.zeros((size, size))
+    for x_start, y_start, patch_img in completed:
+        x_end = min(x_start + patch_img.shape[0], size)
+        y_end = min(y_start + patch_img.shape[1], size)
+        julia_img[x_start:x_end, y_start:y_end] = patch_img[:x_end - x_start, :y_end - y_start]
 
     return julia_img
 
