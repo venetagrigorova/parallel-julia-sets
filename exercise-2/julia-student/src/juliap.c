@@ -1,38 +1,34 @@
-#include <stdio.h>
-#include <complex.h>
+/*
+ * (C) 2021 Sascha Hunold
+ */
+
+#include <math.h>
+#include "filter.h"
 #include <omp.h>
 
-#include "juliap.h"
-
-void compute_julia_set(double xmin, double xmax, double ymin, double ymax, 
-    double **image, int im_width, int im_height)
-{
-    double zabs_max = 10;
-    double complex c = -0.1 + 0.65 * I;
-    int nit_max = 1000;
-
-    double xwidth  = xmax - xmin;
-    double yheight = ymax - ymin;
-
-    // parallelize the two loops with openmp
-    #pragma omp parallel for collapse(2) schedule(runtime)
-    for(int i = 0; i < im_width; i++) {
-        for(int j = 0; j < im_height; j++) {
-            int nit = 0;
-            double complex z;
-
-            // map pixel (i,j) to complex plane
-            z = (double)i / (double)im_width * xwidth + xmin 
-              + ((double)j / (double)im_height * yheight + ymin) * I;
-
-            // iterate z = z^2 + c
-            while( cabs(z) <= zabs_max && nit < nit_max ) {
-                z = cpow(z, 2) + c;
-                nit += 1;
+const int fwidth2  = 1;
+const int fheight2 = 1;
+void apply_filter(png_bytep *row_pointers, png_bytep *buf, int width, int height, double filter[3][3], int rounds) {
+    for (int r = 0; r < rounds; r++) {
+        #pragma omp parallel
+        {
+            #pragma omp single
+            {
+                for (int i = fwidth2; i < width - fwidth2; i++) {
+                    #pragma omp task firstprivate(i)
+                    {
+                        for (int j = fheight2; j < height - fheight2; j++) {
+                            filter_on_pixel(row_pointers, buf, i, j, filter);
+                        }
+                    }
+                }
             }
-
-            // store normalized iteration count
-            image[i][j] = (double)nit / (double)nit_max;
         }
+
+        // Swap buffer with image
+        png_bytep *tmp = buf;
+        buf = row_pointers;
+        row_pointers = tmp;
     }
 }
+
